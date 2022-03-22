@@ -61,6 +61,51 @@ else
 		DF_NAME=2
 		DF_DIVBY=1
 		DF_USE=6
+		MNT_FS=1
+		MNT_PATH=3
+		FT_IDX=1
+		FT_FS=3
+		FT_TYPE=4
+		FT_PATH=5
+		TIMEOUT=1
+		MNT_TYPE=0
+		MNT_FILTER='cat'
+		FT_HEADER='Filesystem Type 1K-blocks Used Avail Use%% Mountpoint'
+		FMT_COLUMN='cat'
+		if [ "$sysname" = "Linux" ]; then
+			MNT_TYPE=5
+			MNT_FILTER='grep -v -e " /proc\(/[\/a-z_]\+\)* " -e " /sys\(/[a-z_,]\+\)* " -e " /dev/\(pts\|hugepages\|mqueue\) " -e " /run/user/\([0-1]\+\)/doc " -e "/home/\([a-z0-9\._]\+\)/.cache/doc"'
+			FT_HEADER='Filesystem Type 1K-blocks Used Available Use%% Mounted_on'
+			if [ "$timeout_coreutils" = "true" ]; then
+				FMT_COLUMN='column -t'
+			fi
+		fi
+		if [ "$sysname" = "FreeBSD" ]; then
+			MNT_FILTER='grep -v -e " \(/[a-z]\+\)*/dev/foo "'
+			FT_HEADER='Filesystem Type 1K-blocks Used Avail Capacity Mounted_on'
+		fi
+
+		# 1} printf $FT_HEADER and mount output
+		# 2) grep - use $MNT_FILTER
+		# 3) awk - output almost like df
+		# 4) sed - prepare for uniq to eliminate duplicated block device names
+		# 5) awk - uniq by $FT_IDX and use timeout controlled df output in subshell
+		# 6) column - format final output
+		if [ "$sysname" = "Linux" ] && [ "$timeout_coreutils" = "true" ]; then
+			DF='( printf "'$FT_HEADER'" ; printf "\n" ; mount \
+				| '$MNT_FILTER' \
+				| awk '"'"'{ printf "%03.0f:",NR ; printf $'$MNT_FS' " $ " ; print $'$MNT_FS' " " $'$MNT_TYPE' " " $'$MNT_PATH' }'"'"' \
+				| sed -e "s_^\([0-9]\+\):\(\/dev\/[^\ ]\+\)_000:~\\2_" \
+				| awk '"'"' { if ( prev != $'$FT_IDX' ) { var = "" ; "( timeout --signal=TERM '$TIMEOUT' df '$DF_ARGS' " $'$FT_PATH' " 2> /dev/null ) | head -n 2 | tail -n 1" | getline var ; if ( var != "" ) { print var } else { print $'$FT_FS' " " $'$FT_TYPE' " [size] [used] [avail] [use] " $'$FT_PATH' } } ; prev = $'$FT_IDX' } '"'"' ) \
+				| '$FMT_COLUMN''
+		else
+			DF='( printf "'$FT_HEADER'" ; printf "\n" ; mount \
+				| '$MNT_FILTER' \
+				| awk '"'"' { printf "%03.0f:",NR ; printf $'$MNT_FS' " $ " ; print $'$MNT_FS' " [type] " $'$MNT_PATH' } '"'"' \
+				| sed -e "s_^\([0-9]\+\):\(\/dev\/[^\ ]\+\)_000:~\\2_" \
+				| awk '"'"' { if ( prev != $'$FT_IDX' ) { var = "" ; "( ( sleep '$TIMEOUT' ; kill $$ 2> /dev/null ) & exec df '$DF_ARGS' " $'$FT_PATH' " 2> /dev/null ) | head -n 2 | tail -n 1" | getline var ; if ( var != "" ) { print var } else { print $'$FT_FS' " " $'$FT_TYPE' " [size] [used] [avail] [use] " $'$FT_PATH' } } ; prev = $'$FT_IDX' } '"'"' ) \
+				| '$FMT_COLUMN''
+		fi
 	else
 		DF_ARGS='-t'
 		DF_AVAIL=4
@@ -68,10 +113,11 @@ else
 		DF_NAME=1
 		DF_DIVBY=2
 		DF_USE=5
+		DF='df '$DF_ARGS''
 	fi
 
 	#FIXME: paths that contain repeated continuos spaces
-	df $DF_ARGS 2>/dev/null | awk "-F " '{
+	sh -c "$DF" 2>/dev/null | awk "-F " '{
 		path = $NF;
 		for (n = NF - 1; n > '$DF_AVAIL' && substr(path, 1, 1) != "/"; n--) {
 			path = $n" "path;
