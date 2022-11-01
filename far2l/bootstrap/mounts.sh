@@ -486,13 +486,13 @@ debug_enabled == "true" {
 					df_total = "[size]";
 					df_used = "[used]";
 					df_avail = "[avail]";
-					df_use_prc = "[useprc]";
+					df_use_prc = "[use%]";
 					df_path = mnt_path;
 
 					if (debug_enabled == "true") {
 						# emulate "df" command output separated by tab
 						# append mnt_options to the end of "df" command output
-						print "[parsed]  " mnt_fs tab mnt_type tab "[size]" tab "[used]" tab "[avail]" tab "[useprc]" tab mnt_path tab mnt_options >> debug_log;
+						print "[parsed]  " mnt_fs tab mnt_type tab "[size]" tab "[used]" tab "[avail]" tab "[use%]" tab mnt_path tab mnt_options >> debug_log;
 					}
 				}
 				else
@@ -731,7 +731,14 @@ debug_enabled == "true" {
 						}
 						else
 						{
-							sep_df_use_prc = separator_symbol df_use_prc;
+							if ((df_use_prc+0.0 < 10) && (df_use_prc != "[use%]")) {
+
+								sep_df_use_prc = separator_symbol separator_symbol df_use_prc;
+							}
+							else
+							{
+								sep_df_use_prc = separator_symbol df_use_prc;
+							}
 						}
 					}
 					else
@@ -1126,7 +1133,14 @@ debug_enabled == "true" {
 			}
 			else
 			{
-				sep_df_use_prc = separator_symbol df_use_prc;
+				if ((df_use_prc+0.0 < 10) && (df_use_prc != "[use%]")) {
+
+					sep_df_use_prc = separator_symbol separator_symbol df_use_prc;
+				}
+				else
+				{
+					sep_df_use_prc = separator_symbol df_use_prc;
+				}
 			}
 		}
 		else
@@ -1176,7 +1190,7 @@ debug_enabled == "true" {
 				sep_total, total_units, sep_df_use_prc, \
 				sep_rw_mode_label, sep_df_type, sep_df_fs >> output_log;
 
-			printf newline >> debug_log;
+			printf newline >> output_log;
 		}
 	}
 }
@@ -1245,7 +1259,7 @@ BEGIN {
 	# anything that can be handled by shell in printf "example_path"
 	# option_fav_nonabs_path should have value 1 to handle this
 	# and value 0 to work with absolute path only
-	option_fav_nonabs_path = 0;
+	option_fav_nonabs_path = 1;
 
 	FS = "\\t";
 
@@ -1254,6 +1268,7 @@ BEGIN {
 	tab_or_space = "'${RGX_TAB_OR_SPC}'";
 	newline = "'${RGX_NEWLINE}'";
 	single_quote = "\047";
+	double_quote = "\"";
 }
 debug_enabled == "true" {
 	printf "====================" >> debug_log;
@@ -1285,30 +1300,32 @@ debug_enabled == "true" {
 			misc_width = 9;
 			misc_ident = "";
 
-			if (option_fav_nonabs_path == 1) {
+			if ((option_fav_nonabs_path == 1) && (fav_path != "")) {
 
-				snqt_fav_path = fav_path;
-				gsub(/'"'"'/, "'"\'"'" "\"" "'"\'"'" "\"" "'"\'"'", snqt_fav_path);
-				snqt_fav_path = sprintf(single_quote "%s" single_quote, snqt_fav_path);
+				esc_fav_path = fav_path;
+				gsub(/\\/, "\\\\", esc_fav_path);
+				gsub(/\ /, "\\\ ", esc_fav_path);
+				gsub(/`/, "\\`", esc_fav_path);
+				gsub(/'"'"'/, "\\" single_quote "", esc_fav_path);
+				gsub(/"/, "\\" double_quote "", esc_fav_path);
+				gsub(/\(/, "\\\(", esc_fav_path);
+				gsub(/\)/, "\\\)", esc_fav_path);
 
-				# example usage of quoted path with single quotes inside
-				## misc_exec = "( printf " snqt_fav_path " 2> /dev/null ) | head -n 1 ";
-
-				misc_exec = "( printf " fav_path " 2> /dev/null ) | head -n 1 ";
+				misc_exec = "( printf " single_quote "%s" single_quote " " esc_fav_path " 2> /dev/null ) | head -n 1 ";
 				"" misc_exec "" | getline misc_path;
 				close(misc_exec);
 
 				if (debug_enabled == "true") {
+					print "[info]  fav_path = _" fav_path "_" >> debug_log;
+					print "[info]  esc_fav_path = _" esc_fav_path "_" >> debug_log;
 					print "[info]  misc_exec = _" misc_exec "_" >> debug_log;
+					print "[info]  misc_path = _" misc_path "_" >> debug_log;
 				}
 			}
 
 			if (misc_path == "") {
-				misc_path = fav_path;
-			}
 
-			if (misc_desc == "") {
-				misc_desc = fav_path;
+				misc_path = fav_path;
 			}
 
 			print_format = "%s\t" misc_ident " %" misc_width "s\t%s\n";
