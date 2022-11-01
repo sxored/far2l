@@ -294,8 +294,8 @@ BEGIN {
 
 	# options values by default for compact output
 	option_mnt_size_wide = 0;
-	option_mnt_show_use_prc = 0;
-	option_mnt_show_type = 0;
+	option_mnt_show_use_prc = 1;
+	option_mnt_show_type = 1;
 	option_mnt_show_fs = 1;
 
 	# works only if mnt_options is not empty
@@ -873,8 +873,8 @@ BEGIN {
 
 	# options values by default for compact output
 	option_mnt_size_wide = 0;
-	option_mnt_show_use_prc = 0;
-	option_mnt_show_type = 0;
+	option_mnt_show_use_prc = 1;
+	option_mnt_show_type = 1;
 	option_mnt_show_fs = 1;
 
 	FS = "\\t";
@@ -1231,8 +1231,11 @@ END {
 ##########################################################
 	FV_PATH=1
 	FV_INFO=2
+	FV_MISC=3
 
 	if [ -s "${FAVORITES}" ]; then
+
+		TIMEOUT=1
 
 		# start script preparation ( parse "favorites" file contents )
 
@@ -1260,6 +1263,20 @@ BEGIN {
 	# option_fav_nonabs_path should have value 1 to handle this
 	# and value 0 to work with absolute path only
 	option_fav_nonabs_path = 1;
+
+	option_fav_misc_cmd = 1;
+
+	if ( "'${timeout_coreutils}'" == "true" ) {
+		timeout_coreutils_available = "true";
+	}
+	else
+	{
+		timeout_coreutils_available = "false";
+	}
+
+	if ( debug_enabled == "true" ) {
+		print "[DEBUG] timeout_coreutils_available = [" timeout_coreutils_available "]" >> debug_log;
+	}
 
 	FS = "\\t";
 
@@ -1326,6 +1343,139 @@ debug_enabled == "true" {
 			if (misc_path == "") {
 
 				misc_path = fav_path;
+			}
+
+			misc_check = "false";
+			misc_processed = 0;
+
+			misc_cmd = $'${FV_INFO}';
+
+			if ((option_fav_misc_cmd == 1) && (misc_cmd ~ "(:mnt|:du)") && (misc_path != "")) {
+
+				misc_desc = $'${FV_MISC}';
+
+				snqt_misc_path = misc_path;
+				gsub(/'"'"'/, "'"\'"'" "\"" "'"\'"'" "\"" "'"\'"'", snqt_misc_path);
+				snqt_misc_path = sprintf(single_quote "%s" "/" single_quote, snqt_misc_path);
+
+				if (misc_cmd ~ "(:mnt|:du)") {
+
+					misc_exec = "[ -d " snqt_misc_path " ] && [ -r " snqt_misc_path " ] && echo true || echo false";
+					"" misc_exec "" | getline misc_check;
+					close(misc_exec);
+
+					if (debug_enabled == "true") {
+						print "[info]  misc_path = _" misc_path "_" >> debug_log;
+						print "[info]  snqt_misc_path = _" snqt_misc_path "_" >> debug_log;
+						print "[info]  misc_exec = _" misc_exec "_" >> debug_log;
+						print "[info]  misc_check = _" misc_check "_" >> debug_log;
+					}
+
+					if (misc_check == "") {
+
+						misc_check = "false";
+					}
+				}
+
+				if (misc_cmd == ":mnt") {
+
+					if (misc_check == "true") {
+
+						if (timeout_coreutils_available == "true") {
+							# work with timeout command from coreutils
+							misc_exec = "( echo ; timeout --signal=TERM '${TIMEOUT}' mount | grep -e '"'"' on " misc_path " '"'"' 2> /dev/null ; echo ; ) | head -n 2 | tail -n 1 ";
+						}
+						else
+						{
+							# work with sleep and kill command trick
+							misc_exec = "( ( sleep '${TIMEOUT}' ; kill $$ 2> /dev/null ) & exec ; mount | grep -e '"'"' on " misc_path " '"'"' 2> /dev/null ; echo ; echo ; ) | head -n 2 | tail -n 1 ";
+						}
+
+						if ("'${sysname}'" == "FreeBSD") {
+
+							misc_exec = misc_exec "| sed -e s:^\\\\\\([^\\\\\\ ]\\\\\\{1,\\\\\\}\\\\\\)\\\\\\(.\\\\\\{1,\\\\\\}\\\\\\):\\\\\\1:g ;";
+						}
+						else
+						{
+							misc_exec = misc_exec "| sed -e s:^\\\\\\([^\\\\\\ ]\\\\\\+\\\\\\)\\\\\\(.\\\\\\+\\\\\\):\\\\\\1:g ;";
+						}
+
+						"" misc_exec "" | getline misc_info;
+						close(misc_exec);
+
+						if (debug_enabled == "true") {
+							print "[info]  misc_path = _" misc_path "_" >> debug_log;
+							print "[info]  snqt_misc_path = _" snqt_misc_path "_" >> debug_log;
+							print "[info]  misc_exec = _" misc_exec "_" >> debug_log;
+							print "[info]  misc_info = _" misc_info "_" >> debug_log;
+						}
+
+						if (misc_info == "") {
+							misc_info = "+";
+							misc_width = 2;
+						}
+
+					}
+					else
+					{
+						misc_info = "-";
+						misc_width = 2;
+						misc_ident = "";
+					}
+
+					misc_processed = 1;
+				}
+
+				if (misc_cmd == ":du") {
+
+					if (misc_check == "true") {
+
+						misc_width = 5;
+						misc_ident = "=";
+
+
+						if (timeout_coreutils_available == "true") {
+							# work with timeout command from coreutils
+							misc_exec = "( timeout --signal=TERM '${TIMEOUT}' du -sh " snqt_misc_path " 2> /dev/null ) | head -n 2 | tail -n 1 ";
+							misc_exec = misc_exec "| sed -e s:^\\\\\\([0-9a-zA-Z\\\\\\.,\\\\\\ ]\\\\\\+\\\\\\)\\\\\\(.\\\\\\+\\\\\\):\\\\\\1:g ;";
+						}
+						else
+						{
+							# work with sleep and kill command trick
+							misc_exec = "( ( sleep '${TIMEOUT}' ; kill $$ 2> /dev/null ) & exec ; du -sh " snqt_misc_path " 2> /dev/null ; echo ; echo ; ) | head -n 2 | tail -n 1 ";
+							misc_exec = misc_exec "| sed -e s:^\\\\\\([0-9a-zA-Z\\\\\\.,\\\\\\ ]\\\\\\{1,\\\\\\}\\\\\\)\\\\\\(.\\\\\\{1,\\\\\\}\\\\\\):\\\\\\1:g ;";
+						}
+
+						"" misc_exec "" | getline misc_info;
+						close(misc_exec);
+
+						if (debug_enabled == "true") {
+							print "[info]  misc_path = _" misc_path "_" >> debug_log;
+							print "[info]  snqt_misc_path = _" snqt_misc_path "_" >> debug_log;
+							print "[info]  misc_exec = _" misc_exec "_" >> debug_log;
+							print "[info]  misc_info = _" misc_info "_" >> debug_log;
+						}
+
+						if (misc_info == "") {
+
+							misc_info = "?";
+							misc_width = 2;
+						}
+					}
+					else
+					{
+						misc_info = "-";
+						misc_width = 2;
+						misc_ident = "=";
+					}
+
+					misc_processed = 1;
+				}
+
+				if (misc_processed == 0) {
+
+					misc_info = misc_cmd;
+				}
 			}
 
 			print_format = "%s\t" misc_ident " %" misc_width "s\t%s\n";
